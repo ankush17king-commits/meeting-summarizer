@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Meeting Summarizer</title>
+<style>
+  :root {
+    --ink: #1c2321;
+    --paper: #f6f5f1;
+    --line: #d8d5cc;
+    --accent: #2f5d50;
+    --accent-soft: #e4ece9;
+    --mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+    --serif: "Newsreader", "Georgia", serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 20px;
+    margin-bottom: 32px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: 32px;
+    font-weight: 500;
+    margin: 0;
+  }
+  .sub {
+    color: #5c635f;
+    margin-top: 6px;
+    font-size: 13px;
+  }
+  .drop {
+    border: 1px dashed var(--line);
+    border-radius: 4px;
+    padding: 28px;
+    text-align: center;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .drop:hover, .drop.dragover {
+    border-color: var(--accent);
+  }
+  .drop input { display: none; }
+  .drop p { margin: 0; color: #5c635f; }
+  .drop .filename {
+    margin-top: 10px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  button.primary {
+    margin-top: 16px;
+    width: 100%;
+    padding: 12px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+  }
+  button.primary:disabled {
+    background: #a9b3ae;
+    cursor: not-allowed;
+  }
+  button.primary:hover:not(:disabled) { background: #244a40; }
+
+  .status {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--accent);
+    min-height: 16px;
+  }
+  .status.error { color: #a5432a; }
+
+  section.result { margin-top: 40px; }
+  .block { margin-bottom: 28px; }
+  .block h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin: 0 0 10px 0;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 6px;
+  }
+  .block p { margin: 0; white-space: pre-wrap; }
+  .block ul { margin: 0; padding-left: 18px; }
+  .block li { margin-bottom: 6px; }
+  .action-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .action-item:last-child { border-bottom: none; }
+  .owner {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+    align-self: flex-start;
+  }
+  .transcript-box {
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--line);
+    padding: 14px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    color: #3a3f3c;
+  }
+  .empty { color: #8a9089; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Audio &rarr; Transcript &rarr; Action Items</div>
+    <h1>Meeting Summarizer</h1>
+    <div class="sub">Upload a recording. Get the transcript, the decisions, and who owns what.</div>
+  </header>
+
+  <div class="drop" id="dropZone">
+    <input type="file" id="fileInput" accept=".mp3,.mp4,.wav,.m4a,.webm,.mpeg,.mpga" />
+    <p>Drop an audio file here, or click to choose one</p>
+    <div class="filename" id="filenameLabel"></div>
+  </div>
+
+  <button class="primary" id="submitBtn" disabled>Choose a file first</button>
+  <div class="status" id="statusLine"></div>
+
+  <section class="result" id="resultSection" style="display:none;">
+    <div class="block">
+      <h2>Summary</h2>
+      <p id="summaryText"></p>
+    </div>
+    <div class="block">
+      <h2>Key Decisions</h2>
+      <ul id="decisionsList"></ul>
+    </div>
+    <div class="block">
+      <h2>Action Items</h2>
+      <div id="actionItemsList"></div>
+    </div>
+    <div class="block">
+      <h2>Full Transcript</h2>
+      <div class="transcript-box" id="transcriptText"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+  // Change this if your backend runs somewhere other than localhost:8000
+  const API_BASE = "http://localhost:8000";
+
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const filenameLabel = document.getElementById("filenameLabel");
+  const submitBtn = document.getElementById("submitBtn");
+  const statusLine = document.getElementById("statusLine");
+  const resultSection = document.getElementById("resultSection");
+
+  let selectedFile = null;
+
+  dropZone.addEventListener("click", () => fileInput.click());
+
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.classList.add("dragover");
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("dragover");
+    if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+  });
+
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) setFile(fileInput.files[0]);
+  });
+
+  function setFile(file) {
+    selectedFile = file;
+    filenameLabel.textContent = file.name;
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Transcribe & summarize";
+    statusLine.textContent = "";
+    statusLine.className = "status";
+  }
+
+  submitBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Processing... this can take a minute";
+    statusLine.textContent = "Uploading and transcribing audio...";
+    statusLine.className = "status";
+    resultSection.style.display = "none";
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    try {
+      const response = await fetch(`${API_BASE}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `Request failed (${response.status})`);
+      }
+
+      const data = await response.json();
+      renderResult(data);
+      statusLine.textContent = "Done.";
+    } catch (err) {
+      statusLine.textContent = `Error: ${err.message}`;
+      statusLine.className = "status error";
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Transcribe & summarize";
+    }
+  });
+
+  function renderResult(data) {
+    document.getElementById("summaryText").textContent = data.summary || "No summary generated.";
+
+    const decisionsList = document.getElementById("decisionsList");
+    decisionsList.innerHTML = "";
+    if (data.decisions && data.decisions.length) {
+      data.decisions.forEach((d) => {
+        const li = document.createElement("li");
+        li.textContent = d;
+        decisionsList.appendChild(li);
+      });
+    } else {
+      decisionsList.innerHTML = '<div class="empty">No explicit decisions detected.</div>';
+    }
+
+    const actionItemsList = document.getElementById("actionItemsList");
+    actionItemsList.innerHTML = "";
+    if (data.action_items && data.action_items.length) {
+      data.action_items.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "action-item";
+        row.innerHTML = `<span>${item.task}</span><span class="owner">${item.owner || "Unassigned"}</span>`;
+        actionItemsList.appendChild(row);
+      });
+    } else {
+      actionItemsList.innerHTML = '<div class="empty">No action items detected.</div>';
+    }
+
+    document.getElementById("transcriptText").textContent = data.transcript || "";
+
+    resultSection.style.display = "block";
+  }
+</script>
+</body>
+</html>
